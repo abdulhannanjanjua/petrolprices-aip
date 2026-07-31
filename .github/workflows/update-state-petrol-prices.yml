@@ -1,0 +1,25 @@
+name: Update state petrol prices
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "15 5 * * 1"
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python update_state_petrol_prices.py
+      - name: Commit updated state petrol data
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: Update AIP retail petrol state prices
+          file_pattern: data/petrol_state_weekly_prices.csv data/petrol_state_weekly_prices.xlsx

@@ -17,3 +17,10 @@ streamlit run app.py
 The refresh is all-or-nothing across Sydney, Canberra, Melbourne, Brisbane, Adelaide, Perth, Darwin, and Hobart. Newer weeks are appended. If AIP revises the latest existing week, that latest week is overwritten; older history is not silently rewritten.
 
 Values are sourced from AIP's retail ULP city chart data and rounded to 1 decimal place in the CSV/XLSX outputs.
+
+## State average app
+
+Use `app_state.py` as the Streamlit main file to deploy the state-average version. It uses:
+
+- `data/petrol_state_weekly_prices.csv`
+- `data/petrol_state_weekly_prices.xlsx`
