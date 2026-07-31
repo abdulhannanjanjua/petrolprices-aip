@@ -52,7 +52,7 @@ def _extract_city_series(city: str) -> pd.DataFrame:
 
     series = pd.DataFrame(data, columns=["week_ending", city])
     series["week_ending"] = pd.to_datetime(series["week_ending"], unit="ms").dt.normalize()
-    series[city] = series[city].astype(float)
+    series[city] = series[city].astype(float).round(1)
     return series
 
 
@@ -95,6 +95,7 @@ def load_prices(csv_path: Path) -> pd.DataFrame:
 
 def save_prices(df: pd.DataFrame, csv_path: Path, xlsx_path: Path) -> None:
     output = df.sort_values("week_ending").copy()
+    output[CITIES] = output[CITIES].round(1)
     output["month_start"] = output["month_start"].dt.date
     output["week_ending"] = output["week_ending"].dt.date
     output.to_csv(csv_path, index=False)

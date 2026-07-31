@@ -31,8 +31,24 @@ def ensure_xlsx(df: pd.DataFrame) -> None:
 st.title("AIP retail petrol prices")
 st.caption(
     "Weekly retail petrol prices (cents per litre, incl. GST) scraped live from aip.com.au. "
-    "Source data: AIP / Motormouth."
+    "Source data: AIP / Motormouth. Stored and exported values are rounded to 1 decimal place."
 )
+
+with st.expander("Source links"):
+    st.markdown(
+        "\n".join(
+            [
+                "- [Sydney](https://www.aip.com.au/pricing/ULP/NSW/sydney)",
+                "- [Canberra](https://www.aip.com.au/pricing/ULP/NSW/canberra)",
+                "- [Melbourne](https://www.aip.com.au/pricing/ULP/VIC/melbourne)",
+                "- [Brisbane](https://www.aip.com.au/pricing/ULP/QLD/brisbane)",
+                "- [Adelaide](https://www.aip.com.au/pricing/ULP/SA/adelaide)",
+                "- [Perth](https://www.aip.com.au/pricing/ULP/WA/perth)",
+                "- [Darwin](https://www.aip.com.au/pricing/ULP/NT/darwin)",
+                "- [Hobart](https://www.aip.com.au/pricing/ULP/TAS/hobart)",
+            ]
+        )
+    )
 
 selected_cities = st.multiselect("Cities", CITIES, default=CITIES, label_visibility="collapsed")
 
