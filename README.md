@@ -16,7 +16,7 @@ streamlit run app.py
 
 The refresh is all-or-nothing across Sydney, Canberra, Melbourne, Brisbane, Adelaide, Perth, Darwin, and Hobart. Newer weeks are appended. If AIP revises the latest existing week, that latest week is overwritten; older history is not silently rewritten.
 
-Values are sourced from AIP's retail ULP city chart data and rounded to 1 decimal place in the CSV/XLSX outputs.
+Values are sourced from the `chartSeries` data embedded in AIP's current retail petrol pages and rounded to 1 decimal place in the CSV/XLSX outputs.
 
 ## State average app
 

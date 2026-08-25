@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 import pandas as pd
@@ -12,25 +12,30 @@ import pandas as pd
 
 STATES = ["NSW", "VIC", "QLD", "SA", "WA", "NT", "TAS"]
 
-STATE_SERIES = {
-    "NSW": ("retailNswUlp", "NSW State Average"),
-    "VIC": ("retailVicUlp", "Victorian State Average"),
-    "QLD": ("retailQldUlp", "Queensland State Average"),
-    "SA": ("retailSaUlp", "South Australian State Average"),
-    "WA": ("retailWaUlp", "Western Australian State Average"),
-    "NT": ("retailNtUlp", "Northern Territory State Average"),
-    "TAS": ("retailTasUlp", "Tasmanian State Average"),
+STATE_PAGE_URLS = {
+    "NSW": "https://aip.com.au/pricing/petrol/new-south-wales-act-retail-petrol-prices/nsw-state-average/",
+    "VIC": "https://aip.com.au/pricing/petrol/victorian-retail-petrol-prices/victorian-state-average/",
+    "QLD": "https://aip.com.au/pricing/petrol/queensland-retail-petrol-prices/queensland-state-average/",
+    "SA": "https://aip.com.au/pricing/petrol/south-australian-retail-petrol-prices/south-australian-state-average/",
+    "WA": "https://aip.com.au/pricing/petrol/western-australian-retail-petrol-prices/western-australian-state-average/",
+    "NT": "https://aip.com.au/pricing/petrol/northern-territory-retail-petrol-prices/northern-territory-state-average/",
+    "TAS": "https://aip.com.au/pricing/petrol/tasmania-retail-petrol-prices/tasmanian-state-average/",
 }
 
-STATE_PAGE_URLS = {
-    "NSW": "https://aip.com.au/pricing/ULP/NSW/nsw-state-average",
-    "VIC": "https://aip.com.au/pricing/ULP/VIC/victorian-state-average",
-    "QLD": "https://www.aip.com.au/pricing/ULP/QLD/queensland-state-average",
-    "SA": "https://www.aip.com.au/index.php/pricing/ULP/SA/south-australian-state-average",
-    "WA": "https://aip.com.au/pricing/ULP/WA/western-australian-state-average",
-    "NT": "https://aip.com.au/pricing/ULP/NT/northern-territory-state-average",
-    "TAS": "https://aip.com.au/pricing/ULP/TAS/tasmanian-state-average",
+STATE_SERIES_NAMES = {
+    "NSW": "NSW State Average",
+    "VIC": "Victorian State Average",
+    "QLD": "Queensland State Average",
+    "SA": "South Australian State Average",
+    "WA": "Western Australian State Average",
+    "NT": "Northern Territory State Average",
+    "TAS": "Tasmanian State Average",
 }
+
+CHART_SERIES_PATTERN = re.compile(
+    r"const\s+chartSeries\s*=\s*(\[.*?\]);\s*const\s+chartTitle",
+    flags=re.DOTALL,
+)
 
 
 @dataclass
@@ -40,27 +45,45 @@ class ScrapeResult:
     scraped_at: str
 
 
-def api_url(call: str, location: str) -> str:
-    return (
-        "https://www.aip.com.au/aip-api-request?api-path=public/api"
-        f"&call={quote(call)}&location={quote(location)}"
-    )
-
-
-def extract_series(call: str, location: str, column_name: str) -> pd.DataFrame:
-    request = Request(api_url(call, location), headers={"User-Agent": "Macromonitor petrol price scraper"})
-    with urlopen(request, timeout=30) as response:
-        payload = json.loads(response.read().decode("utf-8", errors="replace"))
+def extract_chart_series(html: str, series_name: str, column_name: str) -> pd.DataFrame:
+    match = CHART_SERIES_PATTERN.search(html)
+    if not match:
+        raise ValueError(f"Could not find AIP chartSeries data for {column_name}")
 
     try:
-        data = payload["series"][0]["data"]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise ValueError(f"Could not find chart data for {column_name}") from exc
+        chart_series = json.loads(match.group(1))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"AIP returned invalid chartSeries JSON for {column_name}") from exc
 
-    series = pd.DataFrame(data, columns=["week_ending", column_name])
-    series["week_ending"] = pd.to_datetime(series["week_ending"], unit="ms").dt.normalize()
-    series[column_name] = series[column_name].astype(float).round(1)
-    return series
+    selected = next(
+        (
+            series
+            for series in chart_series
+            if str(series.get("name", "")).casefold() == series_name.casefold()
+        ),
+        chart_series[0] if chart_series else None,
+    )
+    if not selected or not selected.get("data"):
+        raise ValueError(f"AIP returned no chart points for {column_name}")
+
+    series = pd.DataFrame(selected["data"], columns=["week_ending", column_name])
+    series["week_ending"] = (
+        pd.to_datetime(series["week_ending"], unit="ms", utc=True)
+        .dt.tz_convert(None)
+        .dt.normalize()
+    )
+    series[column_name] = pd.to_numeric(series[column_name], errors="coerce")
+    if series[column_name].isna().any():
+        raise ValueError(f"AIP returned missing or non-numeric prices for {column_name}")
+    series[column_name] = series[column_name].round(1)
+    return series.drop_duplicates("week_ending", keep="last").sort_values("week_ending")
+
+
+def extract_series(url: str, series_name: str, column_name: str) -> pd.DataFrame:
+    request = Request(url, headers={"User-Agent": "Macromonitor petrol price scraper"})
+    with urlopen(request, timeout=30) as response:
+        html = response.read().decode("utf-8", errors="replace")
+    return extract_chart_series(html, series_name, column_name)
 
 
 def scrape_latest_state_petrol_prices() -> ScrapeResult:
@@ -68,9 +91,8 @@ def scrape_latest_state_petrol_prices() -> ScrapeResult:
     failures: dict[str, str] = {}
 
     for state in STATES:
-        call, location = STATE_SERIES[state]
         try:
-            frames.append(extract_series(call, location, state))
+            frames.append(extract_series(STATE_PAGE_URLS[state], STATE_SERIES_NAMES[state], state))
         except Exception as exc:
             failures[state] = str(exc)
 
@@ -89,7 +111,7 @@ def scrape_latest_state_petrol_prices() -> ScrapeResult:
 
     return ScrapeResult(
         rows=rows,
-        source_urls=[api_url(*STATE_SERIES[state]) for state in STATES],
+        source_urls=[STATE_PAGE_URLS[state] for state in STATES],
         scraped_at=datetime.now().isoformat(timespec="seconds"),
     )
 

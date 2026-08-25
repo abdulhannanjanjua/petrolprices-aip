@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 import pandas as pd
@@ -12,16 +12,21 @@ import pandas as pd
 
 CITIES = ["Sydney", "Canberra", "Melbourne", "Brisbane", "Adelaide", "Perth", "Darwin", "Hobart"]
 
-CITY_CALL = {
-    "Sydney": "retailNswUlp",
-    "Canberra": "retailNswUlp",
-    "Melbourne": "retailVicUlp",
-    "Brisbane": "retailQldUlp",
-    "Adelaide": "retailSaUlp",
-    "Perth": "retailWaUlp",
-    "Darwin": "retailNtUlp",
-    "Hobart": "retailTasUlp",
+CITY_PAGE_URLS = {
+    "Sydney": "https://aip.com.au/pricing/petrol/new-south-wales-act-retail-petrol-prices/sydney/",
+    "Canberra": "https://aip.com.au/pricing/petrol/new-south-wales-act-retail-petrol-prices/canberra/",
+    "Melbourne": "https://aip.com.au/pricing/petrol/victorian-retail-petrol-prices/melbourne/",
+    "Brisbane": "https://aip.com.au/pricing/petrol/queensland-retail-petrol-prices/brisbane/",
+    "Adelaide": "https://aip.com.au/pricing/petrol/south-australian-retail-petrol-prices/adelaide/",
+    "Perth": "https://aip.com.au/pricing/petrol/western-australian-retail-petrol-prices/perth/",
+    "Darwin": "https://aip.com.au/pricing/petrol/northern-territory-retail-petrol-prices/darwin/",
+    "Hobart": "https://aip.com.au/pricing/petrol/tasmania-retail-petrol-prices/hobart/",
 }
+
+CHART_SERIES_PATTERN = re.compile(
+    r"const\s+chartSeries\s*=\s*(\[.*?\]);\s*const\s+chartTitle",
+    flags=re.DOTALL,
+)
 
 
 @dataclass
@@ -31,29 +36,46 @@ class ScrapeResult:
     scraped_at: str
 
 
-def _api_url(city: str) -> str:
-    call = CITY_CALL[city]
-    return (
-        "https://www.aip.com.au/aip-api-request?api-path=public/api"
-        f"&call={quote(call)}&location={quote(city)}"
+def extract_chart_series(html: str, series_name: str, column_name: str) -> pd.DataFrame:
+    match = CHART_SERIES_PATTERN.search(html)
+    if not match:
+        raise ValueError(f"Could not find AIP chartSeries data for {column_name}")
+
+    try:
+        chart_series = json.loads(match.group(1))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"AIP returned invalid chartSeries JSON for {column_name}") from exc
+
+    selected = next(
+        (
+            series
+            for series in chart_series
+            if str(series.get("name", "")).casefold() == series_name.casefold()
+        ),
+        chart_series[0] if chart_series else None,
     )
+    if not selected or not selected.get("data"):
+        raise ValueError(f"AIP returned no chart points for {column_name}")
+
+    series = pd.DataFrame(selected["data"], columns=["week_ending", column_name])
+    series["week_ending"] = (
+        pd.to_datetime(series["week_ending"], unit="ms", utc=True)
+        .dt.tz_convert(None)
+        .dt.normalize()
+    )
+    series[column_name] = pd.to_numeric(series[column_name], errors="coerce")
+    if series[column_name].isna().any():
+        raise ValueError(f"AIP returned missing or non-numeric prices for {column_name}")
+    series[column_name] = series[column_name].round(1)
+    return series.drop_duplicates("week_ending", keep="last").sort_values("week_ending")
 
 
 def _extract_city_series(city: str) -> pd.DataFrame:
-    url = _api_url(city)
+    url = CITY_PAGE_URLS[city]
     request = Request(url, headers={"User-Agent": "Macromonitor petrol price scraper"})
     with urlopen(request, timeout=30) as response:
-        payload = json.loads(response.read().decode("utf-8", errors="replace"))
-
-    try:
-        data = payload["series"][0]["data"]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise ValueError(f"Could not find chart data for {city}") from exc
-
-    series = pd.DataFrame(data, columns=["week_ending", city])
-    series["week_ending"] = pd.to_datetime(series["week_ending"], unit="ms").dt.normalize()
-    series[city] = series[city].astype(float).round(1)
-    return series
+        html = response.read().decode("utf-8", errors="replace")
+    return extract_chart_series(html, city, city)
 
 
 def scrape_latest_petrol_prices() -> ScrapeResult:
@@ -81,7 +103,7 @@ def scrape_latest_petrol_prices() -> ScrapeResult:
 
     return ScrapeResult(
         rows=rows,
-        source_urls=[_api_url(city) for city in CITIES],
+        source_urls=[CITY_PAGE_URLS[city] for city in CITIES],
         scraped_at=datetime.now().isoformat(timespec="seconds"),
     )
 

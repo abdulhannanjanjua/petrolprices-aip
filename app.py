@@ -6,7 +6,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from scraper import CITIES, load_prices, merge_latest, save_prices, scrape_latest_petrol_prices
+from scraper import CITY_PAGE_URLS, CITIES, load_prices, merge_latest, save_prices, scrape_latest_petrol_prices
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -35,20 +35,7 @@ st.caption(
 )
 
 with st.expander("Source links"):
-    st.markdown(
-        "\n".join(
-            [
-                "- [Sydney](https://www.aip.com.au/pricing/ULP/NSW/sydney)",
-                "- [Canberra](https://www.aip.com.au/pricing/ULP/NSW/canberra)",
-                "- [Melbourne](https://www.aip.com.au/pricing/ULP/VIC/melbourne)",
-                "- [Brisbane](https://www.aip.com.au/pricing/ULP/QLD/brisbane)",
-                "- [Adelaide](https://www.aip.com.au/pricing/ULP/SA/adelaide)",
-                "- [Perth](https://www.aip.com.au/pricing/ULP/WA/perth)",
-                "- [Darwin](https://www.aip.com.au/pricing/ULP/NT/darwin)",
-                "- [Hobart](https://www.aip.com.au/pricing/ULP/TAS/hobart)",
-            ]
-        )
-    )
+    st.markdown("\n".join(f"- [{city}]({CITY_PAGE_URLS[city]})" for city in CITIES))
 
 selected_cities = st.multiselect("Cities", CITIES, default=CITIES, label_visibility="collapsed")
 
